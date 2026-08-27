@@ -4,6 +4,15 @@ import { OFFERS, REVENUE_API, type Offer } from "./storeData";
 const cleanMetric = (value: string | null, fallback: string) =>
   (value || fallback).trim().slice(0, 120);
 
+const slugMetric = (value: string, fallback: string) => {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 28);
+  return slug || fallback;
+};
+
 const sourceFromUrl = () => {
   const params = new URLSearchParams(window.location.search);
   const tagged = params.get("utm_source") || params.get("source");
@@ -28,13 +37,35 @@ const campaignFromUrl = () => {
   );
 };
 
-function recordClick(offer: Offer) {
+const newClickId = (offer: Offer, source: string, campaign: string) => {
+  const entropy =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID().replace(/-/g, "").slice(0, 12)
+      : Math.random().toString(36).slice(2, 14);
+
+  return [
+    "m11",
+    slugMetric(offer.id, "offer"),
+    slugMetric(source, "direct"),
+    slugMetric(campaign, "organic"),
+    entropy,
+  ].join(".").slice(0, 120);
+};
+
+function recordClick(
+  offer: Offer,
+  clickId: string,
+  source: string,
+  campaign: string,
+) {
   const payload = JSON.stringify({
     event: "affiliate_click",
+    clickId,
+    tid: clickId,
     offerId: offer.id,
     offerName: offer.name,
-    source: sourceFromUrl(),
-    campaign: campaignFromUrl(),
+    source,
+    campaign,
     path: window.location.pathname.slice(0, 160),
     ts: new Date().toISOString(),
   });
@@ -59,6 +90,25 @@ function recordClick(offer: Offer) {
   }
 }
 
+function trackedMerchantUrl(
+  offer: Offer,
+  clickId: string,
+  source: string,
+  campaign: string,
+) {
+  const merchant = new URL(offer.href);
+  merchant.searchParams.set("tid", clickId);
+  merchant.searchParams.set(
+    "affcup",
+    [
+      slugMetric(offer.id, "offer"),
+      slugMetric(source, "direct"),
+      slugMetric(campaign, "organic"),
+    ].join("."),
+  );
+  return merchant.toString();
+}
+
 function App() {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Offer | null>(null);
@@ -75,13 +125,23 @@ function App() {
   }, [query]);
 
   const goToOffer = (offer: Offer) => {
-    recordClick(offer);
+    const source = sourceFromUrl();
+    const campaign = campaignFromUrl();
+    const clickId = newClickId(offer, source, campaign);
+    const merchantUrl = trackedMerchantUrl(
+      offer,
+      clickId,
+      source,
+      campaign,
+    );
+
+    recordClick(offer, clickId, source, campaign);
 
     // Open synchronously while the browser still recognizes the user gesture.
     // If a browser blocks the new tab, fall back to same-tab navigation so a
     // tracking request can never cost the shopper (or us) the merchant visit.
-    const popup = window.open(offer.href, "_blank", "noopener,noreferrer");
-    if (!popup) window.location.assign(offer.href);
+    const popup = window.open(merchantUrl, "_blank", "noopener,noreferrer");
+    if (!popup) window.location.assign(merchantUrl);
   };
 
   return (
