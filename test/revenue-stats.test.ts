@@ -1,10 +1,20 @@
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
+type StatsPayload = {
+  local: {
+    clicks: number;
+    confirmedSales: number;
+    commission: number;
+    conversionRate: number;
+    epc: number;
+  };
+};
+
 describe("Moneyhi11s revenue API", () => {
   it("reports a healthy Worker", async () => {
     const response = await SELF.fetch("https://example.com/api/health");
-    const body = await response.json() as { ok: boolean; service: string };
+    const body = (await response.json()) as unknown as { ok: boolean; service: string };
 
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
@@ -28,15 +38,7 @@ describe("Moneyhi11s revenue API", () => {
     expect(click.status).toBe(200);
 
     const statsResponse = await SELF.fetch("https://example.com/api/stats");
-    const stats = await statsResponse.json() as {
-      local: {
-        clicks: number;
-        confirmedSales: number;
-        commission: number;
-        conversionRate: number;
-        epc: number;
-      };
-    };
+    const stats = (await statsResponse.json()) as unknown as StatsPayload;
 
     expect(statsResponse.status).toBe(200);
     expect(stats.local.clicks).toBeGreaterThanOrEqual(1);
