@@ -8,8 +8,9 @@ export type Offer = {
   tags: string[];
 };
 
-export const REVENUE_API =
-  "https://moneyhi11s-revenue-engine.hwydfwwf4s.workers.dev";
+// Same-origin tracking keeps attribution fast and reliable. The Worker stores
+// events durably and forwards them to the existing Moneyhi11s revenue engine.
+export const REVENUE_API = "";
 
 export const OFFERS: Offer[] = [
   {
