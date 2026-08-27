@@ -1,9 +1,17 @@
+import type { RevenueStatsDO as RevenueStatsType } from "./revenue-stats";
+
 export { MyWorkflow } from "./workflow";
 export { WorkflowStatusDO } from "./durable-object";
 export { RevenueStatsDO } from "./revenue-stats";
 
 const UPSTREAM_REVENUE_API =
   "https://moneyhi11s-revenue-engine.hwydfwwf4s.workers.dev";
+
+type RuntimeEnv = Env & {
+  REVENUE_STATS: DurableObjectNamespace<RevenueStatsType>;
+  ASSETS: { fetch(request: Request): Promise<Response> };
+  SALE_WEBHOOK_SECRET?: string;
+};
 
 function json(data: unknown, init: ResponseInit = {}) {
   return Response.json(data, {
@@ -20,6 +28,7 @@ function json(data: unknown, init: ResponseInit = {}) {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const runtime = env as RuntimeEnv;
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS") {
@@ -33,16 +42,14 @@ export default {
       });
     }
 
-    const revenueId = env.REVENUE_STATS.idFromName("global");
-    const revenue = env.REVENUE_STATS.get(revenueId);
+    const revenueId = runtime.REVENUE_STATS.idFromName("global");
+    const revenue = runtime.REVENUE_STATS.get(revenueId);
 
     if (url.pathname === "/api/click" && request.method === "POST") {
       try {
         const body = (await request.json()) as Record<string, unknown>;
         await revenue.recordClick(body);
 
-        // Best-effort forward to the existing Moneyhi11s revenue engine.
-        // Failure upstream never blocks or loses the local click record.
         try {
           await fetch(`${UPSTREAM_REVENUE_API}/api/click`, {
             method: "POST",
@@ -66,18 +73,14 @@ export default {
         });
         if (response.ok) upstream = await response.json();
       } catch {}
-
       return json({ local, upstream });
     }
 
-    // Confirmed-sale intake is protected by a secret configured in Cloudflare.
-    // This is intended for legitimate affiliate/network webhooks only.
     if (url.pathname === "/api/sale" && request.method === "POST") {
-      const secret = (env as unknown as { SALE_WEBHOOK_SECRET?: string }).SALE_WEBHOOK_SECRET;
+      const secret = runtime.SALE_WEBHOOK_SECRET;
       if (!secret || request.headers.get("x-moneyhi11s-secret") !== secret) {
         return json({ error: "Unauthorized" }, { status: 401 });
       }
-
       try {
         const body = (await request.json()) as Record<string, unknown>;
         const state = await revenue.recordSale(body);
@@ -132,6 +135,6 @@ export default {
       }
     }
 
-    return env.ASSETS.fetch(request);
+    return runtime.ASSETS.fetch(request);
   },
 } satisfies ExportedHandler<Env>;
