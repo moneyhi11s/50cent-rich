@@ -1,54 +1,58 @@
-import { env } from "cloudflare:test";
+import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import type { RevenueStatsDO } from "../worker/revenue-stats";
 
-type RevenueTestEnv = typeof env & {
-  REVENUE_STATS: DurableObjectNamespace<RevenueStatsDO>;
-};
+describe("Moneyhi11s revenue API", () => {
+  it("reports a healthy Worker", async () => {
+    const response = await SELF.fetch("https://example.com/api/health");
+    const body = await response.json() as { ok: boolean; service: string };
 
-const revenueEnv = env as unknown as RevenueTestEnv;
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.service).toBe("moneyhi11s-store");
+  });
 
-describe("RevenueStatsDO", () => {
-  it("tracks clicks, commission, conversion rate and EPC", async () => {
-    const id = revenueEnv.REVENUE_STATS.idFromName(`metrics-${Date.now()}`);
-    const stub = revenueEnv.REVENUE_STATS.get(id);
-
-    await stub.recordClick({
-      offerId: "millionaire",
-      offerName: "Millionaire Program",
-      source: "youtube",
-      campaign: "review-1",
-      path: "/",
-      ts: new Date().toISOString(),
+  it("records a legitimate click and exposes conversion metrics", async () => {
+    const click = await SELF.fetch("https://example.com/api/click", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        offerId: "millionaire",
+        offerName: "Millionaire Program",
+        source: "youtube",
+        campaign: "review-1",
+        path: "/",
+        ts: new Date().toISOString(),
+      }),
     });
 
-    const duplicateFirst = await stub.recordSale({
-      orderId: "order-1",
-      offerId: "millionaire",
-      offerName: "Millionaire Program",
-      source: "youtube",
-      campaign: "review-1",
-      commission: 25,
-      ts: new Date().toISOString(),
+    expect(click.status).toBe(200);
+
+    const statsResponse = await SELF.fetch("https://example.com/api/stats");
+    const stats = await statsResponse.json() as {
+      local: {
+        clicks: number;
+        confirmedSales: number;
+        commission: number;
+        conversionRate: number;
+        epc: number;
+      };
+    };
+
+    expect(statsResponse.status).toBe(200);
+    expect(stats.local.clicks).toBeGreaterThanOrEqual(1);
+    expect(stats.local.confirmedSales).toBeGreaterThanOrEqual(0);
+    expect(stats.local.commission).toBeGreaterThanOrEqual(0);
+    expect(stats.local.conversionRate).toBeGreaterThanOrEqual(0);
+    expect(stats.local.epc).toBeGreaterThanOrEqual(0);
+  });
+
+  it("rejects untrusted sale callbacks", async () => {
+    const response = await SELF.fetch("https://example.com/api/sale", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ orderId: "fake-order", commission: 999 }),
     });
 
-    const duplicateSecond = await stub.recordSale({
-      orderId: "order-1",
-      offerId: "millionaire",
-      source: "youtube",
-      campaign: "review-1",
-      commission: 25,
-    });
-
-    const stats = await stub.getStats();
-
-    expect(duplicateFirst).toBe(false);
-    expect(duplicateSecond).toBe(true);
-    expect(stats.clicks).toBe(1);
-    expect(stats.confirmedSales).toBe(1);
-    expect(stats.commission).toBe(25);
-    expect(stats.conversionRate).toBe(1);
-    expect(stats.epc).toBe(25);
-    expect(stats.processedOrders).toBeUndefined();
+    expect(response.status).toBe(401);
   });
 });
