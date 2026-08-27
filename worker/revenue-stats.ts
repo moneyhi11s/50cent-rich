@@ -78,7 +78,7 @@ export class RevenueStatsDO extends DurableObject {
     };
   }
 
-  async recordClick(event: ClickEvent): Promise<RevenueState> {
+  async recordClick(event: ClickEvent): Promise<void> {
     const state = await this.state();
     const offer = clean(event.offerId, "unknown");
     const source = clean(event.source, "direct");
@@ -100,16 +100,15 @@ export class RevenueStatsDO extends DurableObject {
     });
     state.recentEvents = state.recentEvents.slice(0, 100);
     await this.ctx.storage.put("revenue", state);
-    return state;
   }
 
-  async recordSale(event: SaleEvent): Promise<{ state: RevenueState; duplicate: boolean }> {
+  async recordSale(event: SaleEvent): Promise<boolean> {
     const state = await this.state();
     const orderId = clean(event.orderId, "", 160);
     if (!orderId) throw new Error("orderId is required");
 
     if (state.processedOrders[orderId]) {
-      return { state, duplicate: true };
+      return true;
     }
 
     const offer = clean(event.offerId, "unknown");
@@ -127,8 +126,6 @@ export class RevenueStatsDO extends DurableObject {
     bucket(state.byCampaign, campaign, "sale", commission);
     state.processedOrders[orderId] = new Date().toISOString();
 
-    // Keep enough dedupe history for retries without allowing the state object to
-    // grow forever. Oldest entries are removed first.
     const processed = Object.entries(state.processedOrders);
     if (processed.length > 5000) {
       processed
@@ -150,7 +147,7 @@ export class RevenueStatsDO extends DurableObject {
     });
     state.recentEvents = state.recentEvents.slice(0, 100);
     await this.ctx.storage.put("revenue", state);
-    return { state, duplicate: false };
+    return false;
   }
 
   async getStats(): Promise<Record<string, unknown>> {
