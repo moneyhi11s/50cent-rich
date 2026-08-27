@@ -1,10 +1,17 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import type { RevenueStatsDO } from "../worker/revenue-stats";
+
+type RevenueTestEnv = typeof env & {
+  REVENUE_STATS: DurableObjectNamespace<RevenueStatsDO>;
+};
+
+const revenueEnv = env as unknown as RevenueTestEnv;
 
 describe("RevenueStatsDO", () => {
   it("tracks clicks, commission, conversion rate and EPC", async () => {
-    const id = env.REVENUE_STATS.idFromName(`metrics-${Date.now()}`);
-    const stub = env.REVENUE_STATS.get(id);
+    const id = revenueEnv.REVENUE_STATS.idFromName(`metrics-${Date.now()}`);
+    const stub = revenueEnv.REVENUE_STATS.get(id);
 
     await stub.recordClick({
       offerId: "millionaire",
