@@ -58,7 +58,6 @@ export default {
 
         await revenue.recordClick(parsed);
 
-        // Upstream synchronization should never delay the shopper's click response.
         ctx.waitUntil(
           fetch(`${UPSTREAM_REVENUE_API}/api/click`, {
             method: "POST",
@@ -105,8 +104,8 @@ export default {
           return json({ error: "orderId is required" }, { status: 400 });
         }
 
-        const result = await revenue.recordSale(parsed);
-        return json({ ok: true, duplicate: result.duplicate, state: result.state });
+        const duplicate = await revenue.recordSale(parsed);
+        return json({ ok: true, duplicate });
       } catch {
         return json({ error: "Invalid sale event" }, { status: 400 });
       }
