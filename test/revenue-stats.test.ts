@@ -9,23 +9,37 @@ type StatsPayload = {
     conversionRate: number;
     epc: number;
   };
+  integrations: {
+    explodelyIsnReady: boolean;
+    protectedSaleWebhookReady: boolean;
+  };
 };
 
 describe("Moneyhi11s revenue API", () => {
-  it("reports a healthy Worker", async () => {
+  it("reports a healthy Worker and integration readiness", async () => {
     const response = await SELF.fetch("https://example.com/api/health");
-    const body = (await response.json()) as unknown as { ok: boolean; service: string };
+    const body = (await response.json()) as unknown as {
+      ok: boolean;
+      service: string;
+      explodelyIsnReady: boolean;
+      protectedSaleWebhookReady: boolean;
+    };
 
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(body.service).toBe("moneyhi11s-store");
+    expect(typeof body.explodelyIsnReady).toBe("boolean");
+    expect(typeof body.protectedSaleWebhookReady).toBe("boolean");
   });
 
-  it("records a legitimate click and exposes conversion metrics", async () => {
+  it("records a tracked click and exposes conversion metrics", async () => {
+    const clickId = `m11.millionaire.youtube.review-1.${Date.now()}`;
     const click = await SELF.fetch("https://example.com/api/click", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
+        clickId,
+        tid: clickId,
         offerId: "millionaire",
         offerName: "Millionaire Program",
         source: "youtube",
@@ -46,6 +60,14 @@ describe("Moneyhi11s revenue API", () => {
     expect(stats.local.commission).toBeGreaterThanOrEqual(0);
     expect(stats.local.conversionRate).toBeGreaterThanOrEqual(0);
     expect(stats.local.epc).toBeGreaterThanOrEqual(0);
+    expect(typeof stats.integrations.explodelyIsnReady).toBe("boolean");
+  });
+
+  it("fails closed when the Explodely ISN secret is not configured", async () => {
+    const response = await SELF.fetch(
+      "https://example.com/api/explodely/isn?orderid=demo&tid=demo&amount=1",
+    );
+    expect([401, 503]).toContain(response.status);
   });
 
   it("rejects untrusted sale callbacks", async () => {
