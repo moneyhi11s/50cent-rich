@@ -1,41 +1,61 @@
 import { useMemo, useState } from "react";
 import { OFFERS, REVENUE_API, type Offer } from "./storeData";
 
+const cleanMetric = (value: string | null, fallback: string) =>
+  (value || fallback).trim().slice(0, 120);
+
 const sourceFromUrl = () => {
   const params = new URLSearchParams(window.location.search);
-  return (
-    params.get("utm_source") ||
-    params.get("source") ||
-    document.referrer ||
-    "direct"
-  );
+  const tagged = params.get("utm_source") || params.get("source");
+  if (tagged) return cleanMetric(tagged, "direct");
+
+  if (document.referrer) {
+    try {
+      return cleanMetric(new URL(document.referrer).hostname, "referral");
+    } catch {
+      return "referral";
+    }
+  }
+
+  return "direct";
 };
 
 const campaignFromUrl = () => {
   const params = new URLSearchParams(window.location.search);
-  return params.get("utm_campaign") || params.get("campaign") || "organic";
+  return cleanMetric(
+    params.get("utm_campaign") || params.get("campaign"),
+    "organic",
+  );
 };
 
-async function recordClick(offer: Offer) {
-  const payload = {
+function recordClick(offer: Offer) {
+  const payload = JSON.stringify({
     event: "affiliate_click",
     offerId: offer.id,
     offerName: offer.name,
     source: sourceFromUrl(),
     campaign: campaignFromUrl(),
-    path: window.location.pathname,
+    path: window.location.pathname.slice(0, 160),
     ts: new Date().toISOString(),
-  };
+  });
 
   try {
-    await fetch(`${REVENUE_API}/api/click`, {
+    if (navigator.sendBeacon) {
+      const sent = navigator.sendBeacon(
+        `${REVENUE_API}/api/click`,
+        new Blob([payload], { type: "application/json" }),
+      );
+      if (sent) return;
+    }
+
+    void fetch(`${REVENUE_API}/api/click`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
+      body: payload,
       keepalive: true,
-    });
+    }).catch(() => undefined);
   } catch {
-    // Revenue tracking must never block the shopper from reaching the merchant.
+    // Tracking must never block the shopper from reaching the merchant.
   }
 }
 
@@ -54,9 +74,14 @@ function App() {
     );
   }, [query]);
 
-  const goToOffer = async (offer: Offer) => {
-    await recordClick(offer);
-    window.open(offer.href, "_blank", "noopener,noreferrer");
+  const goToOffer = (offer: Offer) => {
+    recordClick(offer);
+
+    // Open synchronously while the browser still recognizes the user gesture.
+    // If a browser blocks the new tab, fall back to same-tab navigation so a
+    // tracking request can never cost the shopper (or us) the merchant visit.
+    const popup = window.open(offer.href, "_blank", "noopener,noreferrer");
+    if (!popup) window.location.assign(offer.href);
   };
 
   return (
@@ -102,7 +127,7 @@ function App() {
               <button onClick={() => setQuery("online business")}>Online business offers <span>→</span></button>
               <button onClick={() => setQuery("digital")}>Digital products <span>→</span></button>
             </div>
-            <div className="panel-note">We may earn a commission when you purchase through eligible links, at no added cost from us.</div>
+            <div className="panel-note">We may earn a commission when you purchase through eligible links. Always verify the merchant's current price and terms before purchasing.</div>
           </div>
         </section>
 
@@ -140,7 +165,7 @@ function App() {
                 </div>
                 <div className="card-actions">
                   <button className="text-button" onClick={() => setSelected(offer)}>Quick review</button>
-                  <button className="button primary small" onClick={() => void goToOffer(offer)}>View merchant →</button>
+                  <button className="button primary small" onClick={() => goToOffer(offer)}>View merchant →</button>
                 </div>
               </article>
             ))}
@@ -170,7 +195,7 @@ function App() {
             <h2>A store built to convert without misleading shoppers.</h2>
           </div>
           <div className="trust-copy">
-            <p>Moneyhi11s uses affiliate links. That means we may receive compensation from eligible purchases. Compensation does not change the price you pay to the merchant through us.</p>
+            <p>Moneyhi11s uses affiliate links. That means we may receive compensation from eligible purchases. Check the merchant page for the final price and all purchase terms.</p>
             <p>We do not promise earnings or financial outcomes. Product availability, merchant claims, prices and policies can change, so always verify the latest information on the merchant page before purchasing.</p>
           </div>
         </section>
@@ -195,7 +220,7 @@ function App() {
               <li>Read the merchant refund/cancellation terms before purchasing.</li>
               <li>Ignore any earnings expectation unless independently supported by evidence relevant to you.</li>
             </ul>
-            <button className="button primary full" onClick={() => void goToOffer(selected)}>Verify on merchant site →</button>
+            <button className="button primary full" onClick={() => goToOffer(selected)}>Verify on merchant site →</button>
             <small>Affiliate disclosure: Moneyhi11s may earn a commission from eligible purchases.</small>
           </div>
         </div>

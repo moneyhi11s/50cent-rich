@@ -17,27 +17,32 @@ function json(data: unknown, init: ResponseInit = {}) {
     ...init,
     headers: {
       "cache-control": "no-store",
-      "access-control-allow-origin": "*",
-      "access-control-allow-headers": "content-type,x-moneyhi11s-secret",
-      "access-control-allow-methods": "GET,POST,OPTIONS",
+      "x-content-type-options": "nosniff",
       ...(init.headers || {}),
     },
   });
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validClick(body: Record<string, unknown>) {
+  const offerId = body.offerId;
+  return typeof offerId === "string" && offerId.trim().length > 0 && offerId.length <= 120;
+}
+
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const runtime = env as RuntimeEnv;
     const url = new URL(request.url);
 
-    if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: {
-          "access-control-allow-origin": "*",
-          "access-control-allow-headers": "content-type,x-moneyhi11s-secret",
-          "access-control-allow-methods": "GET,POST,OPTIONS",
-        },
+    if (url.pathname === "/api/health" && request.method === "GET") {
+      return json({
+        ok: true,
+        service: "moneyhi11s-store",
+        version: "2026.08.27-hardening",
+        now: new Date().toISOString(),
       });
     }
 
@@ -46,16 +51,21 @@ export default {
 
     if (url.pathname === "/api/click" && request.method === "POST") {
       try {
-        const body = (await request.json()) as Record<string, unknown>;
-        await revenue.recordClick(body);
+        const parsed: unknown = await request.json();
+        if (!isObject(parsed) || !validClick(parsed)) {
+          return json({ error: "Invalid click event" }, { status: 400 });
+        }
 
-        try {
-          await fetch(`${UPSTREAM_REVENUE_API}/api/click`, {
+        await revenue.recordClick(parsed);
+
+        ctx.waitUntil(
+          fetch(`${UPSTREAM_REVENUE_API}/api/click`, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify(body),
-          });
-        } catch {}
+            body: JSON.stringify(parsed),
+            signal: AbortSignal.timeout(2000),
+          }).catch(() => undefined),
+        );
 
         return json({ ok: true });
       } catch {
@@ -66,13 +76,20 @@ export default {
     if (url.pathname === "/api/stats" && request.method === "GET") {
       const local = await revenue.getStats();
       let upstream: unknown = null;
+      let upstreamOk = false;
+
       try {
         const response = await fetch(`${UPSTREAM_REVENUE_API}/api/stats`, {
           headers: { accept: "application/json" },
+          signal: AbortSignal.timeout(2000),
         });
+        upstreamOk = response.ok;
         if (response.ok) upstream = await response.json();
-      } catch {}
-      return json({ local, upstream });
+      } catch {
+        upstreamOk = false;
+      }
+
+      return json({ local, upstream, upstreamOk });
     }
 
     if (url.pathname === "/api/sale" && request.method === "POST") {
@@ -80,10 +97,15 @@ export default {
       if (!secret || request.headers.get("x-moneyhi11s-secret") !== secret) {
         return json({ error: "Unauthorized" }, { status: 401 });
       }
+
       try {
-        const body = (await request.json()) as Record<string, unknown>;
-        const state = await revenue.recordSale(body);
-        return json({ ok: true, state });
+        const parsed: unknown = await request.json();
+        if (!isObject(parsed) || typeof parsed.orderId !== "string" || !parsed.orderId.trim()) {
+          return json({ error: "orderId is required" }, { status: 400 });
+        }
+
+        const duplicate = await revenue.recordSale(parsed);
+        return json({ ok: true, duplicate });
       } catch {
         return json({ error: "Invalid sale event" }, { status: 400 });
       }
@@ -134,6 +156,9 @@ export default {
       }
     }
 
-    return new Response("Not Found", { status: 404 });
+    return new Response("Not Found", {
+      status: 404,
+      headers: { "x-content-type-options": "nosniff" },
+    });
   },
 } satisfies ExportedHandler<Env>;

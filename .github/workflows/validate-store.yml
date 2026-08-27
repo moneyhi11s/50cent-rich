@@ -4,10 +4,11 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [moneyhi11s-store-2026]
+    branches:
+      - "moneyhi11s-*"
 
 jobs:
-  build:
+  build-and-deploy-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,4 +17,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm run build
+      - run: npm test
+      - run: npm run check
