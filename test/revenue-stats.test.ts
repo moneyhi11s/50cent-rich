@@ -12,6 +12,8 @@ type StatsPayload = {
   integrations: {
     explodelyIsnReady: boolean;
     protectedSaleWebhookReady: boolean;
+    revenueAttributionReady: boolean;
+    blockingIssues: string[];
   };
 };
 
@@ -21,15 +23,26 @@ describe("Moneyhi11s revenue API", () => {
     const body = (await response.json()) as unknown as {
       ok: boolean;
       service: string;
-      explodelyIsnReady: boolean;
-      protectedSaleWebhookReady: boolean;
+      integrations: {
+        explodelyIsnReady: boolean;
+        protectedSaleWebhookReady: boolean;
+        revenueAttributionReady: boolean;
+        blockingIssues: string[];
+      };
     };
 
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(body.service).toBe("moneyhi11s-store");
-    expect(typeof body.explodelyIsnReady).toBe("boolean");
-    expect(typeof body.protectedSaleWebhookReady).toBe("boolean");
+    expect(typeof body.integrations.explodelyIsnReady).toBe("boolean");
+    expect(typeof body.integrations.protectedSaleWebhookReady).toBe("boolean");
+    expect(body.integrations.revenueAttributionReady).toBe(
+      body.integrations.explodelyIsnReady,
+    );
+    expect(Array.isArray(body.integrations.blockingIssues)).toBe(true);
+    if (!body.integrations.explodelyIsnReady) {
+      expect(body.integrations.blockingIssues.length).toBeGreaterThan(0);
+    }
   });
 
   it("records a tracked click and exposes conversion metrics", async () => {
@@ -61,6 +74,10 @@ describe("Moneyhi11s revenue API", () => {
     expect(stats.local.conversionRate).toBeGreaterThanOrEqual(0);
     expect(stats.local.epc).toBeGreaterThanOrEqual(0);
     expect(typeof stats.integrations.explodelyIsnReady).toBe("boolean");
+    expect(stats.integrations.revenueAttributionReady).toBe(
+      stats.integrations.explodelyIsnReady,
+    );
+    expect(Array.isArray(stats.integrations.blockingIssues)).toBe(true);
   });
 
   it("fails closed when the Explodely ISN secret is not configured", async () => {
