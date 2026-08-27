@@ -166,7 +166,7 @@ function App() {
 
         <section id="trust" className="section-pad trust-section">
           <div>
-            <div className="eyebrow">TRUST > VIRALITY</div>
+            <div className="eyebrow">TRUST &gt; VIRALITY</div>
             <h2>A store built to convert without misleading shoppers.</h2>
           </div>
           <div className="trust-copy">
