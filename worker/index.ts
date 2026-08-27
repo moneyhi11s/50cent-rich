@@ -10,6 +10,7 @@ const UPSTREAM_REVENUE_API =
 type RuntimeEnv = Env & {
   REVENUE_STATS: DurableObjectNamespace<RevenueStatsType>;
   SALE_WEBHOOK_SECRET?: string;
+  EXPLODELY_ISN_TOKEN?: string;
 };
 
 function json(data: unknown, init: ResponseInit = {}) {
@@ -32,6 +33,47 @@ function validClick(body: Record<string, unknown>) {
   return typeof offerId === "string" && offerId.trim().length > 0 && offerId.length <= 120;
 }
 
+async function parseExplodelyIsn(request: Request) {
+  const url = new URL(request.url);
+  const values: Record<string, string> = {};
+
+  url.searchParams.forEach((value, key) => {
+    values[key] = value;
+  });
+
+  if (request.method === "POST") {
+    const contentType = request.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const parsed: unknown = await request.json();
+      if (isObject(parsed)) {
+        Object.entries(parsed).forEach(([key, value]) => {
+          if (typeof value === "string" || typeof value === "number") {
+            values[key] = String(value);
+          }
+        });
+      }
+    } else {
+      const body = await request.text();
+      const form = new URLSearchParams(body);
+      form.forEach((value, key) => {
+        values[key] = value;
+      });
+    }
+  }
+
+  return values;
+}
+
+function timingSafeEqualText(left: string, right: string) {
+  const encoder = new TextEncoder();
+  const a = encoder.encode(left);
+  const b = encoder.encode(right);
+  if (a.length !== b.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i += 1) mismatch |= a[i] ^ b[i];
+  return mismatch === 0;
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const runtime = env as RuntimeEnv;
@@ -41,7 +83,9 @@ export default {
       return json({
         ok: true,
         service: "moneyhi11s-store",
-        version: "2026.08.27-hardening",
+        version: "2026.08.27-e2e-attribution",
+        explodelyIsnReady: Boolean(runtime.EXPLODELY_ISN_TOKEN),
+        protectedSaleWebhookReady: Boolean(runtime.SALE_WEBHOOK_SECRET),
         now: new Date().toISOString(),
       });
     }
@@ -89,7 +133,44 @@ export default {
         upstreamOk = false;
       }
 
-      return json({ local, upstream, upstreamOk });
+      return json({
+        local,
+        upstream,
+        upstreamOk,
+        integrations: {
+          explodelyIsnReady: Boolean(runtime.EXPLODELY_ISN_TOKEN),
+          protectedSaleWebhookReady: Boolean(runtime.SALE_WEBHOOK_SECRET),
+        },
+      });
+    }
+
+    if (
+      url.pathname === "/api/explodely/isn" &&
+      (request.method === "GET" || request.method === "POST")
+    ) {
+      const secret = runtime.EXPLODELY_ISN_TOKEN;
+      const supplied =
+        url.searchParams.get("key") ||
+        request.headers.get("x-moneyhi11s-isn-token") ||
+        "";
+
+      if (!secret) {
+        return json({ error: "Explodely ISN listener not configured" }, { status: 503 });
+      }
+      if (!supplied || !timingSafeEqualText(secret, supplied)) {
+        return json({ error: "Unauthorized" }, { status: 401 });
+      }
+
+      try {
+        const isn = await parseExplodelyIsn(request);
+        if (!isn.orderid || !isn.tid) {
+          return json({ error: "orderid and tid are required" }, { status: 400 });
+        }
+        const duplicate = await revenue.recordExplodelySale(isn);
+        return json({ ok: true, duplicate });
+      } catch {
+        return json({ error: "Invalid Explodely ISN" }, { status: 400 });
+      }
     }
 
     if (url.pathname === "/api/sale" && request.method === "POST") {
