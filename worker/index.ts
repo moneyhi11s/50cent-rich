@@ -9,7 +9,6 @@ const UPSTREAM_REVENUE_API =
 
 type RuntimeEnv = Env & {
   REVENUE_STATS: DurableObjectNamespace<RevenueStatsType>;
-  ASSETS: { fetch(request: Request): Promise<Response> };
   SALE_WEBHOOK_SECRET?: string;
 };
 
@@ -135,6 +134,6 @@ export default {
       }
     }
 
-    return runtime.ASSETS.fetch(request);
+    return new Response("Not Found", { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
