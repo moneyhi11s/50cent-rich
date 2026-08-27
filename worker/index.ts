@@ -33,6 +33,22 @@ function validClick(body: Record<string, unknown>) {
   return typeof offerId === "string" && offerId.trim().length > 0 && offerId.length <= 120;
 }
 
+function integrationReadiness(runtime: RuntimeEnv) {
+  const explodelyIsnReady = Boolean(runtime.EXPLODELY_ISN_TOKEN);
+  const protectedSaleWebhookReady = Boolean(runtime.SALE_WEBHOOK_SECRET);
+
+  return {
+    explodelyIsnReady,
+    protectedSaleWebhookReady,
+    revenueAttributionReady: explodelyIsnReady,
+    blockingIssues: explodelyIsnReady
+      ? []
+      : [
+          "EXPLODELY_ISN_TOKEN is not configured; confirmed Explodely sales cannot be ingested.",
+        ],
+  };
+}
+
 async function parseExplodelyIsn(request: Request) {
   const url = new URL(request.url);
   const values: Record<string, string> = {};
@@ -83,9 +99,8 @@ export default {
       return json({
         ok: true,
         service: "moneyhi11s-store",
-        version: "2026.08.27-e2e-attribution",
-        explodelyIsnReady: Boolean(runtime.EXPLODELY_ISN_TOKEN),
-        protectedSaleWebhookReady: Boolean(runtime.SALE_WEBHOOK_SECRET),
+        version: "2026.08.27-readiness-gate",
+        integrations: integrationReadiness(runtime),
         now: new Date().toISOString(),
       });
     }
@@ -137,10 +152,7 @@ export default {
         local,
         upstream,
         upstreamOk,
-        integrations: {
-          explodelyIsnReady: Boolean(runtime.EXPLODELY_ISN_TOKEN),
-          protectedSaleWebhookReady: Boolean(runtime.SALE_WEBHOOK_SECRET),
-        },
+        integrations: integrationReadiness(runtime),
       });
     }
 
