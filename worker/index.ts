@@ -33,19 +33,35 @@ function validClick(body: Record<string, unknown>) {
   return typeof offerId === "string" && offerId.trim().length > 0 && offerId.length <= 120;
 }
 
-function integrationReadiness(runtime: RuntimeEnv) {
-  const explodelyIsnReady = Boolean(runtime.EXPLODELY_ISN_TOKEN);
+function integrationReadiness(
+  runtime: RuntimeEnv,
+  stats?: Record<string, unknown>,
+) {
+  const explodelyIsnConfigured = Boolean(runtime.EXPLODELY_ISN_TOKEN);
   const protectedSaleWebhookReady = Boolean(runtime.SALE_WEBHOOK_SECRET);
+  const recentAttributedSales = Number(stats?.attributedSalesInRecentEvents || 0);
+  const explodelyIsnRecentlyVerified =
+    explodelyIsnConfigured &&
+    Number.isFinite(recentAttributedSales) &&
+    recentAttributedSales > 0;
+
+  const blockingIssues: string[] = [];
+  if (!explodelyIsnConfigured) {
+    blockingIssues.push(
+      "EXPLODELY_ISN_TOKEN is not configured; confirmed Explodely sales cannot be ingested.",
+    );
+  } else if (!explodelyIsnRecentlyVerified) {
+    blockingIssues.push(
+      "Explodely ISN is configured but no recently attributed Explodely sale has verified the end-to-end callback path; do not scale from conversion/EPC yet.",
+    );
+  }
 
   return {
-    explodelyIsnReady,
+    explodelyIsnConfigured,
+    explodelyIsnRecentlyVerified,
     protectedSaleWebhookReady,
-    revenueAttributionReady: explodelyIsnReady,
-    blockingIssues: explodelyIsnReady
-      ? []
-      : [
-          "EXPLODELY_ISN_TOKEN is not configured; confirmed Explodely sales cannot be ingested.",
-        ],
+    revenueAttributionReady: explodelyIsnRecentlyVerified,
+    blockingIssues,
   };
 }
 
@@ -94,19 +110,19 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const runtime = env as RuntimeEnv;
     const url = new URL(request.url);
+    const revenueId = runtime.REVENUE_STATS.idFromName("global");
+    const revenue = runtime.REVENUE_STATS.get(revenueId);
 
     if (url.pathname === "/api/health" && request.method === "GET") {
+      const local = await revenue.getStats();
       return json({
         ok: true,
         service: "moneyhi11s-store",
-        version: "2026.08.27-readiness-gate",
-        integrations: integrationReadiness(runtime),
+        version: "2026.08.28-verified-readiness",
+        integrations: integrationReadiness(runtime, local),
         now: new Date().toISOString(),
       });
     }
-
-    const revenueId = runtime.REVENUE_STATS.idFromName("global");
-    const revenue = runtime.REVENUE_STATS.get(revenueId);
 
     if (url.pathname === "/api/click" && request.method === "POST") {
       try {
@@ -152,7 +168,7 @@ export default {
         local,
         upstream,
         upstreamOk,
-        integrations: integrationReadiness(runtime),
+        integrations: integrationReadiness(runtime, local),
       });
     }
 
