@@ -1,10 +1,21 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
+type RevenueTestRpc = {
+  recordClick(event: Record<string, unknown>): Promise<void>;
+  recordExplodelySale(event: Record<string, unknown>): Promise<boolean>;
+  recordSale(event: Record<string, unknown>): Promise<boolean>;
+  getStats(): Promise<Record<string, unknown>>;
+};
+
+const revenueFor = (name: string) => {
+  const id = env.REVENUE_STATS.idFromName(name);
+  return env.REVENUE_STATS.get(id) as unknown as RevenueTestRpc;
+};
+
 describe("Explodely attribution readiness persistence", () => {
   it("keeps verified Explodely attribution after more than 100 later clicks", async () => {
-    const id = env.REVENUE_STATS.idFromName(`readiness-${Date.now()}`);
-    const revenue = env.REVENUE_STATS.get(id);
+    const revenue = revenueFor(`readiness-${Date.now()}`);
     const clickId = `m11.test.direct.persistence.${Date.now()}`;
 
     await revenue.recordClick({
@@ -44,8 +55,7 @@ describe("Explodely attribution readiness persistence", () => {
   });
 
   it("does not let a generic webhook certify Explodely", async () => {
-    const id = env.REVENUE_STATS.idFromName(`generic-${Date.now()}`);
-    const revenue = env.REVENUE_STATS.get(id);
+    const revenue = revenueFor(`generic-${Date.now()}`);
     const clickId = `m11.test.direct.generic.${Date.now()}`;
 
     await revenue.recordClick({
