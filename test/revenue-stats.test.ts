@@ -1,6 +1,14 @@
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
+type Integrations = {
+  explodelyIsnConfigured: boolean;
+  explodelyIsnRecentlyVerified: boolean;
+  protectedSaleWebhookReady: boolean;
+  revenueAttributionReady: boolean;
+  blockingIssues: string[];
+};
+
 type StatsPayload = {
   local: {
     clicks: number;
@@ -9,38 +17,29 @@ type StatsPayload = {
     conversionRate: number;
     epc: number;
   };
-  integrations: {
-    explodelyIsnReady: boolean;
-    protectedSaleWebhookReady: boolean;
-    revenueAttributionReady: boolean;
-    blockingIssues: string[];
-  };
+  integrations: Integrations;
 };
 
 describe("Moneyhi11s revenue API", () => {
-  it("reports a healthy Worker and integration readiness", async () => {
+  it("reports configuration separately from verified attribution readiness", async () => {
     const response = await SELF.fetch("https://example.com/api/health");
     const body = (await response.json()) as unknown as {
       ok: boolean;
       service: string;
-      integrations: {
-        explodelyIsnReady: boolean;
-        protectedSaleWebhookReady: boolean;
-        revenueAttributionReady: boolean;
-        blockingIssues: string[];
-      };
+      integrations: Integrations;
     };
 
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(body.service).toBe("moneyhi11s-store");
-    expect(typeof body.integrations.explodelyIsnReady).toBe("boolean");
+    expect(typeof body.integrations.explodelyIsnConfigured).toBe("boolean");
+    expect(typeof body.integrations.explodelyIsnRecentlyVerified).toBe("boolean");
     expect(typeof body.integrations.protectedSaleWebhookReady).toBe("boolean");
     expect(body.integrations.revenueAttributionReady).toBe(
-      body.integrations.explodelyIsnReady,
+      body.integrations.explodelyIsnRecentlyVerified,
     );
     expect(Array.isArray(body.integrations.blockingIssues)).toBe(true);
-    if (!body.integrations.explodelyIsnReady) {
+    if (!body.integrations.revenueAttributionReady) {
       expect(body.integrations.blockingIssues.length).toBeGreaterThan(0);
     }
   });
@@ -73,9 +72,8 @@ describe("Moneyhi11s revenue API", () => {
     expect(stats.local.commission).toBeGreaterThanOrEqual(0);
     expect(stats.local.conversionRate).toBeGreaterThanOrEqual(0);
     expect(stats.local.epc).toBeGreaterThanOrEqual(0);
-    expect(typeof stats.integrations.explodelyIsnReady).toBe("boolean");
     expect(stats.integrations.revenueAttributionReady).toBe(
-      stats.integrations.explodelyIsnReady,
+      stats.integrations.explodelyIsnRecentlyVerified,
     );
     expect(Array.isArray(stats.integrations.blockingIssues)).toBe(true);
   });
