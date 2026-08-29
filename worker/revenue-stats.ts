@@ -51,6 +51,8 @@ type RevenueState = {
   recentEvents: Array<Record<string, unknown>>;
   processedOrders: Record<string, string>;
   clickIndex: Record<string, ClickAttribution>;
+  explodelyAttributedSalesTotal: number;
+  lastExplodelyAttributedSaleAt?: string;
 };
 
 const EMPTY: RevenueState = {
@@ -63,6 +65,7 @@ const EMPTY: RevenueState = {
   recentEvents: [],
   processedOrders: {},
   clickIndex: {},
+  explodelyAttributedSalesTotal: 0,
 };
 
 function bucket(
@@ -114,6 +117,8 @@ export class RevenueStatsDO extends DurableObject {
       ...(stored || {}),
       processedOrders: stored?.processedOrders || {},
       clickIndex: stored?.clickIndex || {},
+      explodelyAttributedSalesTotal:
+        stored?.explodelyAttributedSalesTotal || 0,
     };
   }
 
@@ -160,6 +165,7 @@ export class RevenueStatsDO extends DurableObject {
   private async recordSaleWithState(
     state: RevenueState,
     event: SaleEvent,
+    provider: "generic" | "explodely" = "generic",
   ): Promise<boolean> {
     const orderId = clean(event.orderId, "", 160);
     if (!orderId) throw new Error("orderId is required");
@@ -175,20 +181,29 @@ export class RevenueStatsDO extends DurableObject {
     const source = clean(event.source, attribution?.source || "unknown");
     const campaign = clean(event.campaign, attribution?.campaign || "unknown");
     const rawCommission = Number(event.commission);
-    const commission = Number.isFinite(rawCommission) && rawCommission >= 0 && rawCommission <= 100000
-      ? rawCommission
-      : 0;
+    const commission =
+      Number.isFinite(rawCommission) && rawCommission >= 0 && rawCommission <= 100000
+        ? rawCommission
+        : 0;
+    const recordedAt = new Date().toISOString();
 
     state.confirmedSales += 1;
     state.commission += commission;
     bucket(state.byOffer, offer, "sale", commission);
     bucket(state.bySource, source, "sale", commission);
     bucket(state.byCampaign, campaign, "sale", commission);
-    state.processedOrders[orderId] = new Date().toISOString();
+    state.processedOrders[orderId] = recordedAt;
     pruneOldest(state.processedOrders, 10000);
+
+    const attributed = Boolean(attribution);
+    if (provider === "explodely" && attributed) {
+      state.explodelyAttributedSalesTotal += 1;
+      state.lastExplodelyAttributedSaleAt = recordedAt;
+    }
 
     state.recentEvents.unshift({
       type: "sale",
+      provider,
       offerId: offer,
       offerName,
       source,
@@ -196,9 +211,9 @@ export class RevenueStatsDO extends DurableObject {
       commission,
       orderId,
       tid: tid || undefined,
-      attributed: Boolean(attribution),
-      ts: clean(event.ts, new Date().toISOString(), 40),
-      recordedAt: new Date().toISOString(),
+      attributed,
+      ts: clean(event.ts, recordedAt, 40),
+      recordedAt,
     });
     state.recentEvents = state.recentEvents.slice(0, 100);
     await this.ctx.storage.put("revenue", state);
@@ -207,7 +222,7 @@ export class RevenueStatsDO extends DurableObject {
 
   async recordSale(event: SaleEvent): Promise<boolean> {
     const state = await this.state();
-    return this.recordSaleWithState(state, event);
+    return this.recordSaleWithState(state, event, "generic");
   }
 
   async recordExplodelySale(event: ExplodelySaleEvent): Promise<boolean> {
@@ -217,31 +232,34 @@ export class RevenueStatsDO extends DurableObject {
       throw new Error("Unsupported transaction type");
     }
 
-    return this.recordSaleWithState(state, {
-      orderId: clean(event.orderid, "", 160),
-      commission: Number(event.amount),
-      tid: clean(event.tid, "", 160),
-      ts: clean(
-        event.saletimestamp ? String(event.saletimestamp) : event.saletimedate,
-        new Date().toISOString(),
-        80,
-      ),
-    });
+    return this.recordSaleWithState(
+      state,
+      {
+        orderId: clean(event.orderid, "", 160),
+        commission: Number(event.amount),
+        tid: clean(event.tid, "", 160),
+        ts: clean(
+          event.saletimestamp ? String(event.saletimestamp) : event.saletimedate,
+          new Date().toISOString(),
+          80,
+        ),
+      },
+      "explodely",
+    );
   }
 
   async getStats(): Promise<Record<string, unknown>> {
     const state = await this.state();
     const conversionRate = state.clicks > 0 ? state.confirmedSales / state.clicks : 0;
     const epc = state.clicks > 0 ? state.commission / state.clicks : 0;
-    const attributedSales = state.recentEvents.filter(
-      (event) => event.type === "sale" && event.attributed === true,
-    ).length;
     const { processedOrders: _processedOrders, clickIndex: _clickIndex, ...publicState } = state;
     return {
       ...publicState,
       conversionRate,
       epc,
-      attributedSalesInRecentEvents: attributedSales,
+      // Backward-compatible readiness field. It is intentionally persistent now,
+      // so high click volume cannot erase proof of a verified Explodely callback.
+      attributedSalesInRecentEvents: state.explodelyAttributedSalesTotal,
       generatedAt: new Date().toISOString(),
     };
   }
