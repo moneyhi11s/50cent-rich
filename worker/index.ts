@@ -39,28 +39,38 @@ function integrationReadiness(
 ) {
   const explodelyIsnConfigured = Boolean(runtime.EXPLODELY_ISN_TOKEN);
   const protectedSaleWebhookReady = Boolean(runtime.SALE_WEBHOOK_SECRET);
-  const recentAttributedSales = Number(stats?.attributedSalesInRecentEvents || 0);
-  const explodelyIsnRecentlyVerified =
+  const attributedSalesTotal = Number(stats?.explodelyAttributedSalesTotal || 0);
+  const lastExplodelyAttributedSaleAt =
+    typeof stats?.lastExplodelyAttributedSaleAt === "string"
+      ? stats.lastExplodelyAttributedSaleAt
+      : null;
+  const explodelyIsnVerified =
     explodelyIsnConfigured &&
-    Number.isFinite(recentAttributedSales) &&
-    recentAttributedSales > 0;
+    Number.isFinite(attributedSalesTotal) &&
+    attributedSalesTotal > 0;
 
   const blockingIssues: string[] = [];
   if (!explodelyIsnConfigured) {
     blockingIssues.push(
       "EXPLODELY_ISN_TOKEN is not configured; confirmed Explodely sales cannot be ingested.",
     );
-  } else if (!explodelyIsnRecentlyVerified) {
+  } else if (!explodelyIsnVerified) {
     blockingIssues.push(
-      "Explodely ISN is configured but no recently attributed Explodely sale has verified the end-to-end callback path; do not scale from conversion/EPC yet.",
+      "Explodely ISN is configured but no attributed Explodely sale has verified the end-to-end callback path; do not scale from conversion/EPC yet.",
     );
   }
 
   return {
     explodelyIsnConfigured,
-    explodelyIsnRecentlyVerified,
+    explodelyIsnVerified,
+    // Backward-compatible alias retained for existing dashboard consumers.
+    explodelyIsnRecentlyVerified: explodelyIsnVerified,
+    explodelyAttributedSalesTotal: Number.isFinite(attributedSalesTotal)
+      ? attributedSalesTotal
+      : 0,
+    lastExplodelyAttributedSaleAt,
     protectedSaleWebhookReady,
-    revenueAttributionReady: explodelyIsnRecentlyVerified,
+    revenueAttributionReady: explodelyIsnVerified,
     blockingIssues,
   };
 }
@@ -118,7 +128,7 @@ export default {
       return json({
         ok: true,
         service: "moneyhi11s-store",
-        version: "2026.08.28-verified-readiness",
+        version: "2026.08.29-persistent-readiness",
         integrations: integrationReadiness(runtime, local),
         now: new Date().toISOString(),
       });
