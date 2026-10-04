@@ -144,7 +144,7 @@ export class RevenueStatsDO extends DurableObject {
         campaign,
         recordedAt,
       };
-      pruneOldest(state.clickIndex, 10000);
+      pruneOldest(state.clickIndex, 50000);
     }
 
     state.recentEvents.unshift({
